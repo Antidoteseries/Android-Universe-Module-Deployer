@@ -1,0 +1,48 @@
+#!/sbin/sh
+# Installer manager for recovery
+# This is a part of Android Universe Module Deployer
+# Licenced by GPLv3
+# Version: 0.1.0 Alpha
+###########################################################################
+
+# Initial Define
+export SOURCE="$3"
+export OUTFD="/proc/self/fd/$2"
+export TMP="/tmp"
+case "$(uname -m)" in
+  *86*) export ARCH="x86";;
+  *ar*) export ARCH="arm";;
+esac
+# Set SELinux to Permissive
+setenforce 0
+# Detect Project Treble
+mount -w /dev/block/bootdevice/by-name/system /system
+if [ -d "/system/system" ];then
+  export PT="1"
+  mount -w /dev/block/bootdevice/by-name/vendor /vendor
+else
+  export PT="0"
+fi
+# Get Modules list
+unzip -o "$SOURCE" bin/unzip -d "$TMP"
+export UNZIPI="$TMP"/bin/unzip
+chmod 755 "$UNZIPI"
+"$UNZIPI" -Z -1 "$SOURCE" | grep Modules > "$TMP"/ModulesList.txt
+sed -i '1d' "$TMP"/ModulesList.txt
+# Prepare to Deploy
+echo "ui_print Android Universe Module Deployer" > "$OUTFD"
+echo "ui_print ==================================" > "$OUTFD"
+# Extract Modules
+for MODZIP in `cat $TMP/ModulesList.txt`
+do
+  "$UNZIPI" -o "$SOURCE" "$MODZIP" -d "$TMP"/AUMD
+  export TARGET="$TMP"/AUMD/"${MODZIP%.zip}"
+  "$UNZIPI" -o "$TMP"/AUMD/"$MODZIP" -d "$TARGET"
+  echo "ui_print Now installing ${MODZIP%.zip}" > "$OUTFD" 
+  sh "$TARGET"/Config.sh
+  #rm -rf "$TARGET"
+done
+# Set Permission
+echo "ui_print ==================================" > "$OUTFD"
+echo "ui_print Deploy Completed" > "$OUTFD"
+exit 0
