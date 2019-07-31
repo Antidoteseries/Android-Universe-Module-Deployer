@@ -1,9 +1,27 @@
 #!/sbin/sh
 # Installer manager for recovery
 # This is a part of Android Universe Module Deployer
+# Author: Antidotes
+# Source: https://github.com/Antidoteseries/Android-Universe-Module-Deployer
 # Licenced by GPLv3
-# Version: 0.1.0 Alpha
+# Version: 0.1.1 Alpha
 ###########################################################################
+
+
+# Function: Extract Modules
+function EXTMOD()
+{
+  case "$MODE" in
+  ZIP)
+    "$UNZIPI" -o "$SOURCE" "$MODEXTED" -d "$TMP"/AUMD
+    export TARGET="$TMP"/AUMD/"${MODEXTED%.zip}"
+    "$UNZIPI" -o "$TMP"/AUMD/"$MODEXTED" -d "$TARGET"
+    ;;
+  Direct)
+    "$UNZIPI" -o "$SOURCE" "$MODEXTED"/* -d "$TMP"/AUMD"$MODEXTED"
+    export TARGET="$TMP"/AUMD/"${MODEXTED}"
+    ;;
+}
 
 # Initial Define
 export SOURCE="$3"
@@ -13,36 +31,101 @@ case "$(uname -m)" in
   *86*) export ARCH="x86";;
   *ar*) export ARCH="arm";;
 esac
+# Get Package Infomation
+unzip -o "$SOURCE" Config.ini -d "$TMP"
+for PKGCONF in "$TMP"/Config.ini;do
+  if [ -n `echo $PKGCONF | awk -F'[=]' '{$2}'` ];then
+    `echo $PKGCONF | awk -F'[=]' '{$1}'`=`echo $PKGCONF | awk -F'[=]' '{$2}'`
+  fi
+done
 # Set SELinux to Permissive
 setenforce 0
 # Detect Project Treble
 mount -w /dev/block/bootdevice/by-name/system /system
 if [ -d "/system/system" ];then
   export PT="1"
-  mount -w /dev/block/bootdevice/by-name/vendor /vendor
 else
   export PT="0"
 fi
+if [ "$PT" == "1" ];then
+  mount -w /dev/block/bootdevice/by-name/vendor /vendor
+  export BUILD=/system/system/build.prop
+  export BUILDV=/vendor/build.prop
+else
+  export BUILD=/system/build.prop
+fi
+# Dectet Sony Xperia Device
+if [ `grep "ro.product.brand" $BUILD` != "ro.product.brand=Sony" ];then
+  mount -w /dev/block/bootdevice/by-name/oem /oem
+fi
+# Prepare to Deploy
+echo "ui_print =========================================" > "$OUTFD"
+if [ -z $PKGNAME ];then
+  echo "ui_print Android Universe Module Deployer" > "$OUTFD"
+else
+  echo "ui_print $PKGNAME" > "$OUTFD"
+  echo "ui_print Powered by Android Universe Module Deployer" > "$OUTFD"
+fi
+echo "ui_print =========================================" > "$OUTFD"
 # Get Modules list
 unzip -o "$SOURCE" bin/unzip -d "$TMP"
 export UNZIPI="$TMP"/bin/unzip
 chmod 755 "$UNZIPI"
 "$UNZIPI" -Z -1 "$SOURCE" | grep Modules > "$TMP"/ModulesList.txt
-sed -i '1d' "$TMP"/ModulesList.txt
-# Prepare to Deploy
-echo "ui_print Android Universe Module Deployer" > "$OUTFD"
-echo "ui_print ==================================" > "$OUTFD"
-# Extract Modules
-for MODZIP in `cat $TMP/ModulesList.txt`
-do
-  "$UNZIPI" -o "$SOURCE" "$MODZIP" -d "$TMP"/AUMD
-  export TARGET="$TMP"/AUMD/"${MODZIP%.zip}"
-  "$UNZIPI" -o "$TMP"/AUMD/"$MODZIP" -d "$TARGET"
-  echo "ui_print Now installing ${MODZIP%.zip}" > "$OUTFD" 
+case "$MODE" in
+  ZIP)
+    sed -i '1d' "$TMP"/ModulesList.txt
+    ;;
+  Direct)
+    for MODENTRY in `cat $TMP/ModulesList.txt`;do
+      MODFILE=`echo $MODENTRY | awk -F'[/]' '{print "/Modules/"$3}'`
+      if [ $MODFILE != $(tail -n 1 "$TMP"/ModulesListNew.txt) ];then
+        echo $MODFILE >> "$TMP"/ModulesListNew.txt
+      fi
+    done
+    rm $TMP/ModulesList.txt
+    mv $TMP/ModulesListNew.txt $TMP/ModulesList.txt
+    ;;
+  *)
+    echo "ui_print ERROR: Unknown Modules Mode" > "$OUTFD"
+    exit 1
+    ;;
+esac
+# Deploy Modules
+for MODEXTED in `cat $TMP/ModulesList.txt`;do
+  EXTMOD
+  # Get Modules Infomation
+  for MODCONF in "$TARGET"/Config.ini;do
+    if [ -n `echo $MODCONF | awk -F'[=]' '{$2}'` ];then
+      `echo $MODCONF | awk -F'[=]' '{$1}'`=`echo $MODCONF | awk -F'[=]' '{$2}'`
+    fi
+  done
+  # Get Modules Files Target
+  for MODPD in system vendor sony_oem;do
+    `echo MOD_$MODPD`=`echo $MODPART | grep $MODPD`
+  done
+  echo "ui_print Now installing ${MODNAME}" > "$OUTFD"
+  if [ -n $MOD_system ];then
+    if [ "$PT" == "1" ];then
+      cp -rf "$TARGET/system" "/system"
+    else
+      cp -rf "$TARGET/system" "/"
+    fi
+  fi
+  if [ -n $MOD_vendor ];then
+    if [ "$PT" == "1" ];then
+      cp -rf "$TARGET/vendor" "/vendor"
+    else
+      cp -rf "$TARGET/vendor" "/system"
+    fi
+  fi
+  if [ -n $MOD_sony_oem ];then
+    cp -rf "$TARGET/oem" "/"
+  fi
   sh "$TARGET"/Config.sh
-  #rm -rf "$TARGET"
+  rm -rf "$TARGET"
 done
 # Set Permission
-echo "ui_print ==================================" > "$OUTFD"
+echo "ui_print =========================================" > "$OUTFD"
 echo "ui_print Deploy Completed" > "$OUTFD"
 exit 0
