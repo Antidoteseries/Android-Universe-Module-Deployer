@@ -1,0 +1,17 @@
+# Config Helper Document
+# This is a part of Android Universe Module Deployer
+# Author: Antidotes
+# Source: https://github.com/Antidoteseries/Android-Universe-Module-Deployer
+# Licenced by GPLv3
+# Version: 0.2.0 Alpha
+###########################################################################
+[Package]
+# Setting for Mode
+# ZIP: Packing your module to a ZIP file one by one, and put them in the Modules folder
+# Direct: Put your module folders in the Modules folder dircetly
+
+[Module]
+# Settings for ModulePart
+# system: Copy all files in (your module folder)/system to device.
+# vendor: Copy all files in (your module folder)/vendor to device. Please notice that DON'T put your vendor files to /system/vendor. It will occuare problems on Project Treble devices.
+# sony_oem:Copy all files in (your module folder)/oem to device. The options is only designed and verifed on Sony Xperia Devices.

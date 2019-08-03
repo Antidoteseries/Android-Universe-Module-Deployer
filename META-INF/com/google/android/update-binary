@@ -4,23 +4,29 @@
 # Author: Antidotes
 # Source: https://github.com/Antidoteseries/Android-Universe-Module-Deployer
 # Licenced by GPLv3
-# Version: 0.1.1 Alpha
+# Version: 0.2.0 Alpha
 ###########################################################################
 
-
-# Function: Extract Modules
-function EXTMOD()
+EXTMOD()
 {
   case "$MODE" in
   ZIP)
-    "$UNZIPI" -o "$SOURCE" "$MODEXTED" -d "$TMP"/AUMD
+    "$UNZIPI" -o "$SOURCE" "$MODEXTED" -d "$TMP"/AUMD/
     export TARGET="$TMP"/AUMD/"${MODEXTED%.zip}"
     "$UNZIPI" -o "$TMP"/AUMD/"$MODEXTED" -d "$TARGET"
     ;;
   Direct)
-    "$UNZIPI" -o "$SOURCE" "$MODEXTED"/* -d "$TMP"/AUMD"$MODEXTED"
+    "$UNZIPI" -o "$SOURCE" "$MODEXTED"/* -d "$TMP"/AUMD/
     export TARGET="$TMP"/AUMD/"${MODEXTED}"
     ;;
+  esac
+}
+
+READINI()
+{
+ local INIFILE=$1; local INISECT=$2; local INIKEY=$3
+ local RESULT=`awk -F '=' '/\['$INISECT'\]/ {FIND=1} FIND==1 && $1~/'$INIKEY'/ {print $2;exit}' $INIFILE`
+ echo $RESULT
 }
 
 # Initial Define
@@ -33,11 +39,9 @@ case "$(uname -m)" in
 esac
 # Get Package Infomation
 unzip -o "$SOURCE" Config.ini -d "$TMP"
-for PKGCONF in "$TMP"/Config.ini;do
-  if [ -n `echo $PKGCONF | awk -F'[=]' '{$2}'` ];then
-    `echo $PKGCONF | awk -F'[=]' '{$1}'`=`echo $PKGCONF | awk -F'[=]' '{$2}'`
-  fi
-done
+PKGNAME=$(READINI $TMP/Config.ini Package PackageName)
+DEVICE=$(READINI $TMP/Config.ini Package Device)
+MODE=$(READINI $TMP/Config.ini Package Mode)
 # Set SELinux to Permissive
 setenforce 0
 # Detect Project Treble
@@ -59,14 +63,14 @@ if [ `grep "ro.product.brand" $BUILD` != "ro.product.brand=Sony" ];then
   mount -w /dev/block/bootdevice/by-name/oem /oem
 fi
 # Prepare to Deploy
-echo "ui_print =========================================" > "$OUTFD"
+echo "ui_print ===========================================" > "$OUTFD"
 if [ -z $PKGNAME ];then
   echo "ui_print Android Universe Module Deployer" > "$OUTFD"
 else
   echo "ui_print $PKGNAME" > "$OUTFD"
   echo "ui_print Powered by Android Universe Module Deployer" > "$OUTFD"
 fi
-echo "ui_print =========================================" > "$OUTFD"
+echo "ui_print ===========================================" > "$OUTFD"
 # Get Modules list
 unzip -o "$SOURCE" bin/unzip -d "$TMP"
 export UNZIPI="$TMP"/bin/unzip
@@ -77,9 +81,11 @@ case "$MODE" in
     sed -i '1d' "$TMP"/ModulesList.txt
     ;;
   Direct)
+    :>$TMP/ModulesListNew.txt
+    sed -i '1d' "$TMP"/ModulesList.txt
     for MODENTRY in `cat $TMP/ModulesList.txt`;do
-      MODFILE=`echo $MODENTRY | awk -F'[/]' '{print "/Modules/"$3}'`
-      if [ $MODFILE != $(tail -n 1 "$TMP"/ModulesListNew.txt) ];then
+      MODFILE=`echo $MODENTRY | awk -F '\/' '{print "Modules/"$2}'`
+      if [ "$MODFILE" != "$(tail -n 1 "$TMP"/ModulesListNew.txt)" ];then
         echo $MODFILE >> "$TMP"/ModulesListNew.txt
       fi
     done
@@ -95,37 +101,40 @@ esac
 for MODEXTED in `cat $TMP/ModulesList.txt`;do
   EXTMOD
   # Get Modules Infomation
-  for MODCONF in "$TARGET"/Config.ini;do
-    if [ -n `echo $MODCONF | awk -F'[=]' '{$2}'` ];then
-      `echo $MODCONF | awk -F'[=]' '{$1}'`=`echo $MODCONF | awk -F'[=]' '{$2}'`
-    fi
-  done
-  # Get Modules Files Target
-  for MODPD in system vendor sony_oem;do
-    `echo MOD_$MODPD`=`echo $MODPART | grep $MODPD`
-  done
+  MODNAME=$(READINI $TARGET/Config.ini Module ModuleName)
+  MODVER=$(READINI $TARGET/Config.ini Module Version)
+  MODVERCODE=$(READINI $TARGET/Config.ini Module VersionCode)
+  MODPART=$(READINI $TARGET/Config.ini Module ModulePart)
   echo "ui_print Now installing ${MODNAME}" > "$OUTFD"
-  if [ -n $MOD_system ];then
-    if [ "$PT" == "1" ];then
-      cp -rf "$TARGET/system" "/system"
-    else
-      cp -rf "$TARGET/system" "/"
-    fi
+  # Get Modules Files Target
+  for MODPD in `echo $MODPART | awk -F ',' '{len=split($0,n); for(i=1;i<=len;++i) print n[i]}'`;do
+    case "$MODPD" in
+    system)
+      if [ "$PT" == "1" ];then
+        cp -rf "$TARGET/system" "/system"
+      else
+        cp -rf "$TARGET/system" "/"
+      fi
+      ;;
+    vendor)
+      if [ "$PT" == "1" ];then
+        cp -rf "$TARGET/vendor" "/vendor"
+      else
+        cp -rf "$TARGET/vendor" "/system"
+      fi
+      ;;
+    sony_oem)
+      cp -rf "$TARGET/oem" "/"
+      ;;
+    esac
+  done
+  if [ -d "$TARGET"/Config.sh ];then
+    sh "$TARGET"/Config.sh
   fi
-  if [ -n $MOD_vendor ];then
-    if [ "$PT" == "1" ];then
-      cp -rf "$TARGET/vendor" "/vendor"
-    else
-      cp -rf "$TARGET/vendor" "/system"
-    fi
-  fi
-  if [ -n $MOD_sony_oem ];then
-    cp -rf "$TARGET/oem" "/"
-  fi
-  sh "$TARGET"/Config.sh
-  rm -rf "$TARGET"
+  rm -rf "$TARGET" 
+  echo "ui_print Install Completed" > "$OUTFD"
 done
 # Set Permission
-echo "ui_print =========================================" > "$OUTFD"
+echo "ui_print ===========================================" > "$OUTFD"
 echo "ui_print Deploy Completed" > "$OUTFD"
 exit 0
