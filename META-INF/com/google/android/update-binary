@@ -4,7 +4,7 @@
 # Author: Antidotes
 # Source: https://github.com/Antidoteseries/Android-Universe-Module-Deployer
 # Licenced by GPLv3
-# Version: 0.2.0 Alpha
+# Version: 0.2.1 Alpha
 ###########################################################################
 
 EXTMOD()
@@ -59,7 +59,7 @@ else
   export BUILD=/system/build.prop
 fi
 # Dectet Sony Xperia Device
-if [ `grep "ro.product.brand" $BUILD` != "ro.product.brand=Sony" ];then
+if [ "grep "ro.product.brand" $BUILD" == "ro.product.brand=Sony" ];then
   mount -w /dev/block/bootdevice/by-name/oem /oem
 fi
 # Prepare to Deploy
@@ -107,6 +107,7 @@ for MODEXTED in `cat $TMP/ModulesList.txt`;do
   MODPART=$(READINI $TARGET/Config.ini Module ModulePart)
   echo "ui_print Now installing ${MODNAME}" > "$OUTFD"
   # Get Modules Files Target
+  echo "ui_print - Deploying Files" > "$OUTFD"
   for MODPD in `echo $MODPART | awk -F ',' '{len=split($0,n); for(i=1;i<=len;++i) print n[i]}'`;do
     case "$MODPD" in
     system)
@@ -128,11 +129,12 @@ for MODEXTED in `cat $TMP/ModulesList.txt`;do
       ;;
     esac
   done
-  if [ -d "$TARGET"/Config.sh ];then
+  if [ -e $TARGET/Config.sh ];then
+    echo "ui_print - Running Additional Script" > "$OUTFD"
     sh "$TARGET"/Config.sh
   fi
   rm -rf "$TARGET" 
-  echo "ui_print Install Completed" > "$OUTFD"
+  echo "ui_print - Install Completed" > "$OUTFD"
 done
 # Set Permission
 echo "ui_print ===========================================" > "$OUTFD"
