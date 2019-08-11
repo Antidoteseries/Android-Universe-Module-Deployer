@@ -4,11 +4,11 @@
 # Author: Antidotes
 # Source: https://github.com/Antidoteseries/Android-Universe-Module-Deployer
 # Licenced by GPLv3
-# Version: 0.2.1 Alpha
+# Version: 0.2.3 Alpha
 ###########################################################################
 
-EXTMOD()
-{
+EXTMOD() {
+  echo "ui_print - Extracting Module" >"$OUTFD"
   case "$MODE" in
   ZIP)
     "$UNZIPI" -o "$SOURCE" "$MODEXTED" -d "$TMP"/AUMD/
@@ -22,11 +22,12 @@ EXTMOD()
   esac
 }
 
-READINI()
-{
- local INIFILE=$1; local INISECT=$2; local INIKEY=$3
- local RESULT=`awk -F '=' '/\['$INISECT'\]/ {FIND=1} FIND==1 && $1~/'$INIKEY'/ {print $2;exit}' $INIFILE`
- echo $RESULT
+READINI() {
+  local INIFILE=$1
+  local INISECT=$2
+  local INIKEY=$3
+  local RESULT=$(awk -F '=' '/\['$INISECT'\]/ {FIND=1} FIND==1 && $1~/'$INIKEY'/ {print $2;exit}' $INIFILE)
+  echo $RESULT
 }
 
 # Initial Define
@@ -34,109 +35,146 @@ export SOURCE="$3"
 export OUTFD="/proc/self/fd/$2"
 export TMP="/tmp"
 case "$(uname -m)" in
-  *86*) export ARCH="x86";;
-  *ar*) export ARCH="arm";;
+*86*) export ARCH="x86" ;;
+*ar*) export ARCH="arm" ;;
+*)
+  echo "ui_print ERROR: Unsupported CPU Architecture" >"$OUTFD"
+  exit 1
+  ;;
 esac
 # Get Package Infomation
 unzip -o "$SOURCE" Config.ini -d "$TMP"
 PKGNAME=$(READINI $TMP/Config.ini Package PackageName)
 DEVICE=$(READINI $TMP/Config.ini Package Device)
 MODE=$(READINI $TMP/Config.ini Package Mode)
+ABSLOT=$(READINI $TMP/Config.ini Package ABSlotConfig)
 # Set SELinux to Permissive
 setenforce 0
-# Detect Project Treble
-mount -w /dev/block/bootdevice/by-name/system /system
-if [ -d "/system/system" ];then
-  export PT="1"
-else
-  export PT="0"
-fi
-if [ "$PT" == "1" ];then
+# Detect Project Treble and A/B Partition
+
+if [ -n "$(cat /proc/cmdline | grep slot_suffix)" ]; then
+  if [[ "$ABSLOT" != "a" ]] || [["$ABSLOT" != "b"]]; then
+    echo "ui_print ERROR: Undefined A/B Slot string. This Package cannot install on A/B Slot devices." >"$OUTFD"
+    exit 1
+  fi
+  ABPARTATION=true
+  mount -w /dev/block/bootdevice/by-name/system_$ABSLOT /system
+  mount -w /dev/block/bootdevice/by-name/vendor_$ABSLOT /vendor
+  SYSTEM=/system/system
+  SYSTEMROOT=/system
+  VENDOR=/vendor
+  VENDORROOT=/
+elif [ -n "$(cat /etc/fstab | grep /system_root)" ]; then
+  ABPARTATION=false
+  mount -w /dev/block/bootdevice/by-name/system_root /system
   mount -w /dev/block/bootdevice/by-name/vendor /vendor
-  export BUILD=/system/system/build.prop
-  export BUILDV=/vendor/build.prop
+  SYSTEM=/system_root/system
+  SYSTEMROOT=/system_root
+  VENDOR=/vendor
+  VENDORROOT=/
 else
-  export BUILD=/system/build.prop
+  ABPARTATION=false
+  mount -w /dev/block/bootdevice/by-name/system /system
+  SYSTEM=/system
+  SYSTEMROOT=/
+  VENDOR=/system/vendor
+  VENDORROOT=/system
 fi
+export BUILD=$SYSTEM/build.prop
+export BUILDV=$VENDOR/build.prop
+
 # Dectet Sony Xperia Device
-if [ "grep "ro.product.brand" $BUILD" == "ro.product.brand=Sony" ];then
+if [ "grep "ro.product.brand" $BUILD" == "ro.product.brand=Sony" ]; then
   mount -w /dev/block/bootdevice/by-name/oem /oem
 fi
 # Prepare to Deploy
-echo "ui_print ===========================================" > "$OUTFD"
-if [ -z $PKGNAME ];then
-  echo "ui_print Android Universe Module Deployer" > "$OUTFD"
+echo "ui_print ===========================================" >"$OUTFD"
+if [ -z $PKGNAME ]; then
+  echo "ui_print Android Universe Module Deployer" >"$OUTFD"
 else
-  echo "ui_print $PKGNAME" > "$OUTFD"
-  echo "ui_print Powered by Android Universe Module Deployer" > "$OUTFD"
+  echo "ui_print $PKGNAME" >"$OUTFD"
+  echo "ui_print Powered by Android Universe Module Deployer" >"$OUTFD"
 fi
-echo "ui_print ===========================================" > "$OUTFD"
+echo "ui_print ===========================================" >"$OUTFD"
 # Get Modules list
-unzip -o "$SOURCE" bin/unzip -d "$TMP"
-export UNZIPI="$TMP"/bin/unzip
+unzip -o "$SOURCE" bin/unzip_$ARCH -d "$TMP"
+export UNZIPI="$TMP"/bin/unzip_$ARCH
 chmod 755 "$UNZIPI"
-"$UNZIPI" -Z -1 "$SOURCE" | grep Modules > "$TMP"/ModulesList.txt
+"$UNZIPI" -Z -1 "$SOURCE" | grep Modules >"$TMP"/ModulesList.txt
 case "$MODE" in
-  ZIP)
-    sed -i '1d' "$TMP"/ModulesList.txt
-    ;;
-  Direct)
-    :>$TMP/ModulesListNew.txt
-    sed -i '1d' "$TMP"/ModulesList.txt
-    for MODENTRY in `cat $TMP/ModulesList.txt`;do
-      MODFILE=`echo $MODENTRY | awk -F '\/' '{print "Modules/"$2}'`
-      if [ "$MODFILE" != "$(tail -n 1 "$TMP"/ModulesListNew.txt)" ];then
-        echo $MODFILE >> "$TMP"/ModulesListNew.txt
-      fi
-    done
-    rm $TMP/ModulesList.txt
-    mv $TMP/ModulesListNew.txt $TMP/ModulesList.txt
-    ;;
-  *)
-    echo "ui_print ERROR: Unknown Modules Mode" > "$OUTFD"
-    exit 1
-    ;;
+ZIP)
+  sed -i '1d' "$TMP"/ModulesList.txt
+  ;;
+Direct)
+  : >$TMP/ModulesListNew.txt
+  sed -i '1d' "$TMP"/ModulesList.txt
+  for MODENTRY in $(cat $TMP/ModulesList.txt); do
+    MODFILE=$(echo $MODENTRY | awk -F '\/' '{print "Modules/"$2}')
+    if [ "$MODFILE" != "$(tail -n 1 "$TMP"/ModulesListNew.txt)" ]; then
+      echo $MODFILE >>"$TMP"/ModulesListNew.txt
+    fi
+  done
+  rm $TMP/ModulesList.txt
+  mv $TMP/ModulesListNew.txt $TMP/ModulesList.txt
+  ;;
+*)
+  echo "ui_print ERROR: Unknown Modules Mode" >"$OUTFD"
+  exit 1
+  ;;
 esac
 # Deploy Modules
-for MODEXTED in `cat $TMP/ModulesList.txt`;do
+for MODEXTED in $(cat $TMP/ModulesList.txt); do
   EXTMOD
   # Get Modules Infomation
   MODNAME=$(READINI $TARGET/Config.ini Module ModuleName)
   MODVER=$(READINI $TARGET/Config.ini Module Version)
   MODVERCODE=$(READINI $TARGET/Config.ini Module VersionCode)
   MODPART=$(READINI $TARGET/Config.ini Module ModulePart)
-  echo "ui_print Now installing ${MODNAME}" > "$OUTFD"
-  # Get Modules Files Target
-  echo "ui_print - Deploying Files" > "$OUTFD"
-  for MODPD in `echo $MODPART | awk -F ',' '{len=split($0,n); for(i=1;i<=len;++i) print n[i]}'`;do
-    case "$MODPD" in
-    system)
-      if [ "$PT" == "1" ];then
-        cp -rf "$TARGET/system" "/system"
-      else
-        cp -rf "$TARGET/system" "/"
-      fi
-      ;;
-    vendor)
-      if [ "$PT" == "1" ];then
-        cp -rf "$TARGET/vendor" "/vendor"
-      else
-        cp -rf "$TARGET/vendor" "/system"
-      fi
-      ;;
-    sony_oem)
-      cp -rf "$TARGET/oem" "/"
-      ;;
-    esac
-  done
-  if [ -e $TARGET/Config.sh ];then
-    echo "ui_print - Running Additional Script" > "$OUTFD"
-    sh "$TARGET"/Config.sh
+  MODENABLE=$(READINI $TARGET/Config.ini Module Enabled)
+  INSTALLSTATE=0
+  if [ "$MODENABLE" != "true" ]; then
+    INSTALLSTATE=1
   fi
-  rm -rf "$TARGET" 
-  echo "ui_print - Install Completed" > "$OUTFD"
+  case "$INSATLLSTATE" in
+  0) # Normally Install
+    echo "ui_print - Installing ${MODNAME}" >"$OUTFD"
+    # Get Modules Files Target
+    echo "ui_print - Deploying Files" >"$OUTFD"
+    for MODPD in $(echo $MODPART | awk -F ',' '{len=split($0,n); for(i=1;i<=len;++i) print n[i]}'); do
+      case "$MODPD" in
+      system)
+        cp -rf "$TARGET/system" "$SYSTEMROOT"
+        ;;
+      vendor)
+        cp -rf "$TARGET/vendor" "$VENDORROOT"
+        ;;
+      sony_oem)
+        cp -rf "$TARGET/oem" "/"
+        ;;
+      esac
+    done
+    if [ -e $TARGET/Config.sh ]; then
+      echo "ui_print - Running Additional Script" >"$OUTFD"
+      sh "$TARGET"/Config.sh
+    fi
+    ;;
+  1) # Module has been disabled
+    echo "ui_print - Module ${MODNAME} isn't installed because it was been disabled" >"$OUTFD" ;;
+  *)
+    echo "ui_print ERROR: Unknown install state" >"$OUTFD"
+    exit 1
+    ;;
+  esac
+  rm -rf "$TARGET"
+  echo "ui_print ${MODNAME} Install Completed" >"$OUTFD"
 done
 # Set Permission
-echo "ui_print ===========================================" > "$OUTFD"
-echo "ui_print Deploy Completed" > "$OUTFD"
+echo "ui_print ===========================================" >"$OUTFD"
+echo "ui_print All Modules are successful installed." >"$OUTFD"
+echo "ui_print Setting Premissions" >"$OUTFD"
+for SETFLODER in app bin etc priv-app; do
+  find /$SYSTEM/$SETFLODER -type f | xargs chmod 644
+  find /$SYSTEM/$SETFLODER -type d | xargs chmod 755
+done
+echo "ui_print Deploy Completed" >"$OUTFD"
 exit 0
