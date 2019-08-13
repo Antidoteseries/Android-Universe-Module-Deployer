@@ -11,14 +11,16 @@ EXTMOD() {
   echo "ui_print - Extracting Module" >"$OUTFD"
   case "$MODE" in
   ZIP)
-    "$UNZIPI" -o "$SOURCE" "$MODEXTED" -d "$TMP"/AUMD/
+    $UNZIPI -o "$SOURCE" "$MODEXTED" -d "$TMP"/AUMD/
     export TARGET="$TMP"/AUMD/"${MODEXTED%.zip}"
-    "$UNZIPI" -o "$TMP"/AUMD/"$MODEXTED" -d "$TARGET"
+    $UNZIPI -o "$TMP"/AUMD/"$MODEXTED" -d "$TARGET"
     ;;
   Direct)
-    "$UNZIPI" -o "$SOURCE" "$MODEXTED"/* -d "$TMP"/AUMD/
+    $UNZIPI -o "$SOURCE" "$MODEXTED"/* -d "$TMP"/AUMD/
     export TARGET="$TMP"/AUMD/"${MODEXTED}"
     ;;
+  TAR) ;;
+
   esac
 }
 
@@ -26,7 +28,7 @@ READINI() {
   local INIFILE=$1
   local INISECT=$2
   local INIKEY=$3
-  local RESULT=$(awk -F '=' '/\['$INISECT'\]/ {FIND=1} FIND==1 && $1~/'$INIKEY'/ {print $2;exit}' $INIFILE)
+  local RESULT=$($BUSYBOXI awk -F '=' '/\['$INISECT'\]/ {FIND=1} FIND==1 && $1~/'$INIKEY'/ {print $2;exit}' $INIFILE)
   echo $RESULT
 }
 
@@ -44,6 +46,13 @@ case "$(uname -m)" in
 esac
 # Get Package Infomation
 unzip -o "$SOURCE" Config.ini -d "$TMP"
+unzip -o "$SOURCE" bin/unzip_$ARCH -d "$TMP"
+unzip -o "$SOURCE" bin/tar_$ARCH -d "$TMP"
+unzip -o "$SOURCE" bin/busybox_$ARCH -d "$TMP"
+export UNZIPI=$TMP/bin/unzip_$ARCH
+export TARI=$TMP/bin/tar_$ARCH
+export BUSYBOXI=$TMP/bin/busybox_$ARCH
+chmod -R 755 $TMP/bin/
 PKGNAME=$(READINI $TMP/Config.ini Package PackageName)
 DEVICE=$(READINI $TMP/Config.ini Package Device)
 MODE=$(READINI $TMP/Config.ini Package Mode)
@@ -51,41 +60,51 @@ ABSLOT=$(READINI $TMP/Config.ini Package ABSlotConfig)
 # Set SELinux to Permissive
 setenforce 0
 # Detect Project Treble and A/B Partition
-
+$BUSYBOXI mkdir /modem
 if [ -n "$(cat /proc/cmdline | grep slot_suffix)" ]; then
   if [[ "$ABSLOT" != "a" ]] || [["$ABSLOT" != "b"]]; then
     echo "ui_print ERROR: Undefined A/B Slot string. This Package cannot install on A/B Slot devices." >"$OUTFD"
     exit 1
   fi
   ABPARTATION=true
-  mount -w /dev/block/bootdevice/by-name/system_$ABSLOT /system
-  mount -w /dev/block/bootdevice/by-name/vendor_$ABSLOT /vendor
-  SYSTEM=/system/system
-  SYSTEMROOT=/system
-  VENDOR=/vendor
-  VENDORROOT=/
+  $BUSYBOXI mount -w /dev/block/bootdevice/by-name/system_$ABSLOT /system
+  $BUSYBOXI mount -w /dev/block/bootdevice/by-name/vendor_$ABSLOT /vendor
+  $BUSYBOXI mount -w /dev/block/bootdevice/by-name/modem_$ABSLOT /modem
+  export SYSTEM=/system/system
+  export SYSTEMROOT=/system
+  export VENDOR=/vendor
+  export VENDORROOT=
+  export MODEM=/modem
 elif [ -n "$(cat /etc/fstab | grep /system_root)" ]; then
   ABPARTATION=false
-  mount -w /dev/block/bootdevice/by-name/system_root /system
-  mount -w /dev/block/bootdevice/by-name/vendor /vendor
-  SYSTEM=/system_root/system
-  SYSTEMROOT=/system_root
-  VENDOR=/vendor
-  VENDORROOT=/
+  $BUSYBOXI mount -w /dev/block/bootdevice/by-name/system_root /system
+  $BUSYBOXI mount -w /dev/block/bootdevice/by-name/vendor /vendor
+  $BUSYBOXI mount -w /dev/block/bootdevice/by-name/modem /modem
+  export SYSTEM=/system_root/system
+  export SYSTEMROOT=/system_root
+  export VENDOR=/vendor
+  export VENDORROOT=/
+  export MODEM=/modem
 else
   ABPARTATION=false
-  mount -w /dev/block/bootdevice/by-name/system /system
-  SYSTEM=/system
-  SYSTEMROOT=/
-  VENDOR=/system/vendor
-  VENDORROOT=/system
+  $BUSYBOXI mount -w /dev/block/bootdevice/by-name/system /system
+  $BUSYBOXI mount -w /dev/block/bootdevice/by-name/modem /modem
+  export SYSTEM=/system
+  export SYSTEMROOT=/
+  export VENDOR=/system/vendor
+  export VENDORROOT=/system
+  export MODEM=/modem
 fi
 export BUILD=$SYSTEM/build.prop
 export BUILDV=$VENDOR/build.prop
 
 # Dectet Sony Xperia Device
 if [ "grep "ro.product.brand" $BUILD" == "ro.product.brand=Sony" ]; then
-  mount -w /dev/block/bootdevice/by-name/oem /oem
+  if [ "$ABPARTATION" == "true" ]; then
+    $BUSYBOXI mount -w /dev/block/bootdevice/by-name/oem_$ABSLOT /oem
+  else
+    $BUSYBOXI mount -w /dev/block/bootdevice/by-name/oem_$ABSLOT /oem
+  fi
 fi
 # Prepare to Deploy
 echo "ui_print ===========================================" >"$OUTFD"
@@ -97,25 +116,22 @@ else
 fi
 echo "ui_print ===========================================" >"$OUTFD"
 # Get Modules list
-unzip -o "$SOURCE" bin/unzip_$ARCH -d "$TMP"
-export UNZIPI="$TMP"/bin/unzip_$ARCH
-chmod 755 "$UNZIPI"
-"$UNZIPI" -Z -1 "$SOURCE" | grep Modules >"$TMP"/ModulesList.txt
+$UNZIPI -Z -1 "$SOURCE" | grep Modules >"$TMP"/ModulesList.txt
 case "$MODE" in
 ZIP)
-  sed -i '1d' "$TMP"/ModulesList.txt
+  $BUSYBOXI sed -i '1d' "$TMP"/ModulesList.txt
   ;;
 Direct)
   : >$TMP/ModulesListNew.txt
-  sed -i '1d' "$TMP"/ModulesList.txt
+  $BUSYBOXI sed -i '1d' "$TMP"/ModulesList.txt
   for MODENTRY in $(cat $TMP/ModulesList.txt); do
-    MODFILE=$(echo $MODENTRY | awk -F '\/' '{print "Modules/"$2}')
-    if [ "$MODFILE" != "$(tail -n 1 "$TMP"/ModulesListNew.txt)" ]; then
+    MODFILE=$(echo $MODENTRY | $BUSYBOXI awk -F '\/' '{print "Modules/"$2}')
+    if [ "$MODFILE" != "$($BUSYBOXI tail -n 1 "$TMP"/ModulesListNew.txt)" ]; then
       echo $MODFILE >>"$TMP"/ModulesListNew.txt
     fi
   done
-  rm $TMP/ModulesList.txt
-  mv $TMP/ModulesListNew.txt $TMP/ModulesList.txt
+  $BUSYBOXI rm $TMP/ModulesList.txt
+  $BUSYBOXI mv $TMP/ModulesListNew.txt $TMP/ModulesList.txt
   ;;
 *)
   echo "ui_print ERROR: Unknown Modules Mode" >"$OUTFD"
@@ -123,6 +139,7 @@ Direct)
   ;;
 esac
 # Deploy Modules
+
 for MODEXTED in $(cat $TMP/ModulesList.txt); do
   EXTMOD
   # Get Modules Infomation
@@ -131,50 +148,50 @@ for MODEXTED in $(cat $TMP/ModulesList.txt); do
   MODVERCODE=$(READINI $TARGET/Config.ini Module VersionCode)
   MODPART=$(READINI $TARGET/Config.ini Module ModulePart)
   MODENABLE=$(READINI $TARGET/Config.ini Module Enabled)
-  INSTALLSTATE=0
+  INSTALLSTATE=NORMAL
   if [ "$MODENABLE" != "true" ]; then
-    INSTALLSTATE=1
+    INSTALLSTATE=DISABLED
   fi
-  case "$INSATLLSTATE" in
-  0) # Normally Install
-    echo "ui_print - Installing ${MODNAME}" >"$OUTFD"
+  echo "ui_print > Module   : ${MODNAME}" >"$OUTFD"
+  echo "ui_print > Version  : ${MODVER}" >"$OUTFD"
+  case "$INSTALLSTATE" in
+  NORMAL)
     # Get Modules Files Target
     echo "ui_print - Deploying Files" >"$OUTFD"
     for MODPD in $(echo $MODPART | awk -F ',' '{len=split($0,n); for(i=1;i<=len;++i) print n[i]}'); do
       case "$MODPD" in
       system)
-        cp -rf "$TARGET/system" "$SYSTEMROOT"
+        $BUSYBOXI cp -rf "$TARGET/system" "$SYSTEMROOT"']'
         ;;
-      vendor)
-        cp -rf "$TARGET/vendor" "$VENDORROOT"
-        ;;
-      sony_oem)
-        cp -rf "$TARGET/oem" "/"
+      modem)
+        $BUSYBOXI cp -rf "$TARGET/modem" "/"
         ;;
       esac
     done
     if [ -e $TARGET/Config.sh ]; then
       echo "ui_print - Running Additional Script" >"$OUTFD"
-      sh "$TARGET"/Config.sh
+      $BUSYBOXI sh "$TARGET"/Config.sh
     fi
+    echo "ui_print - Install Completed" >"$OUTFD"
     ;;
-  1) # Module has been disabled
-    echo "ui_print - Module ${MODNAME} isn't installed because it was been disabled" >"$OUTFD" ;;
+  DISABLED)
+    echo "ui_print - Module isn't installed because it was been disabled" >"$OUTFD"
+    ;;
   *)
     echo "ui_print ERROR: Unknown install state" >"$OUTFD"
     exit 1
     ;;
   esac
-  rm -rf "$TARGET"
-  echo "ui_print ${MODNAME} Install Completed" >"$OUTFD"
+  $BUSYBOXI rm -rf "$TARGET"
+  echo "ui_print -------------------------------------------" >"$OUTFD"
 done
 # Set Permission
-echo "ui_print ===========================================" >"$OUTFD"
 echo "ui_print All Modules are successful installed." >"$OUTFD"
 echo "ui_print Setting Premissions" >"$OUTFD"
-for SETFLODER in app bin etc priv-app; do
-  find /$SYSTEM/$SETFLODER -type f | xargs chmod 644
-  find /$SYSTEM/$SETFLODER -type d | xargs chmod 755
-done
+#for SETFLODER in app bin etc priv-app; do
+#  $BUSYBOXI find /$SYSTEM/$SETFLODER -type f | xargs $BUSYBOXI chmod 644
+#  $BUSYBOXI find /$SYSTEM/$SETFLODER -type d | xargs $BUSYBOXI chmod 755
+#done
 echo "ui_print Deploy Completed" >"$OUTFD"
+echo "ui_print ===========================================" >"$OUTFD"
 exit 0
