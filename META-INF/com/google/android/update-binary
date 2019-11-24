@@ -4,23 +4,22 @@
 # Author: Antidotes
 # Source: https://github.com/Antidoteseries/Android-Universe-Module-Deployer
 # Licenced by GPLv3
-# Version: 0.2.3 Alpha
+# Version: 0.2.9 Alpha
 ###########################################################################
 
 EXTMOD() {
   echo "ui_print - Extracting Module" >"$OUTFD"
   case "$MODE" in
   ZIP)
-    $UNZIPI -o "$SOURCE" "$MODEXTED" -d "$TMP"/AUMD/
-    export TARGET="$TMP"/AUMD/"${MODEXTED%.zip}"
-    $UNZIPI -o "$TMP"/AUMD/"$MODEXTED" -d "$TARGET"
+    "$UNZIPI" -o "$SOURCE" "$MODEXTED" -d "$TMP"/AUMD/
+    export TARGET="$TMP/AUMD/${MODEXTED%.zip}"
+    "$UNZIPI" -o "$TMP/AUMD/$MODEXTED" -d "$TARGET"
     ;;
   Direct)
-    $UNZIPI -o "$SOURCE" "$MODEXTED"/* -d "$TMP"/AUMD/
-    export TARGET="$TMP"/AUMD/"${MODEXTED}"
+    "$UNZIPI" -o "$SOURCE" "$MODEXTED"/* -d "$TMP"/AUMD/
+    export TARGET="$TMP/AUMD/${MODEXTED}"
     ;;
   TAR) ;;
-
   esac
 }
 
@@ -40,7 +39,7 @@ case "$(uname -m)" in
 *86*) export ARCH="x86" ;;
 *ar*) export ARCH="arm" ;;
 *)
-  echo "ui_print ERROR: Unsupported CPU Architecture" >"$OUTFD"
+  echo "ui_print ERROR: Unsupported Architecture" >"$OUTFD"
   exit 1
   ;;
 esac
@@ -73,7 +72,7 @@ if [ -n "$(cat /proc/cmdline | grep slot_suffix)" ]; then
   export SYSTEM=/system/system
   export SYSTEMROOT=/system
   export VENDOR=/vendor
-  export VENDORROOT=
+  export VENDORROOT=/
   export MODEM=/modem
 elif [ -n "$(cat /etc/fstab | grep /system_root)" ]; then
   ABPARTATION=false
@@ -99,11 +98,11 @@ export BUILD=$SYSTEM/build.prop
 export BUILDV=$VENDOR/build.prop
 
 # Dectet Sony Xperia Device
-if [ "grep "ro.product.brand" $BUILD" == "ro.product.brand=Sony" ]; then
+if [ "grep ro.product.brand $BUILD" == "ro.product.brand=Sony" ]; then
   if [ "$ABPARTATION" == "true" ]; then
     $BUSYBOXI mount -w /dev/block/bootdevice/by-name/oem_$ABSLOT /oem
   else
-    $BUSYBOXI mount -w /dev/block/bootdevice/by-name/oem_$ABSLOT /oem
+    $BUSYBOXI mount -w /dev/block/bootdevice/by-name/oem /oem
   fi
 fi
 # Prepare to Deploy
@@ -139,7 +138,6 @@ Direct)
   ;;
 esac
 # Deploy Modules
-
 for MODEXTED in $(cat $TMP/ModulesList.txt); do
   EXTMOD
   # Get Modules Infomation
