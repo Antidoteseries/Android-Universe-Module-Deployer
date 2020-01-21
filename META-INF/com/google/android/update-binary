@@ -4,7 +4,7 @@
 # Author: Antidotes
 # Source: https://github.com/Antidoteseries/Android-Universe-Module-Deployer
 # Licenced by GPLv3
-# Version: 0.3.0 Alpha
+# Version: 0.3.1 Alpha
 ###########################################################################
 
 # Initial Define
@@ -89,21 +89,49 @@ for CreateFolder in system vendor oem modem persist; do
   $InternalBusyBox mkdir "$TempFolder/Mounted/$CreateFolder"
 done
 
-# Unmount Partations
-for UnmountName in system system_root system_a system_b vendor vendor_a vendor_b oem oem_a oem_b modem modem_a modem_b cache persist; do
-  $InternalBusyBox umount "/dev/block/bootdevice/by-name/$UnmountName"
-  $InternalBusyBox umount -l "/dev/block/bootdevice/by-name/$UnmountName"
-done
+# Avoid Mount/Unmount Partatition Repeated
+UnmountParatition() {
+  local WillUnmountPath=$1
+  local WillUnmountType=$2
+  case "$WillUnmountType" in
+  Device)
+    WillUnmountFullPath="/dev/block/bootdevice/by-name/$WillUnmountPath"
+    ;;
+  Folder)
+    WillUnmountFullPath="$TempFolder/Mounted/$WillUnmountPath"
+    ;;
+  esac
+  if [ -n $($InternalBusyBox mount | grep $WillUnmountPath)]; then
+    $InternalBusyBox umount "$WillUnmountFullPath"
+    $InternalBusyBox umount -l "$WillUnmountFullPath"
+  fi
+}
+MountParatition() {
+  local WillMountPartition=$1
+  local WillMountPath=$2
+  if [ -z $($InternalBusyBox mount | grep $WillMountPartition)]; then
+    if [-n $($InternalBusyBox mount | grep $WillMountPath)]; then
+      UnmountParatition $WillMountPath Folder
+    fi
+    $InternalBusyBox mount -w "/dev/block/bootdevice/by-name/$WillMountPartition" "$TempFolder/Mounted/$WillMountPath"
+  fi
+}
+UnmountAllPartatition() {
+  for UnmountName in system system_root system_a system_b vendor vendor_a vendor_b oem oem_a oem_b modem modem_a modem_b cache persist; do
+    UnmountParatition $UnmountName Device
+  done
+}
 
 # Prepare to Deploy
 echo "ui_print ===========================================" >"$PrintOut"
-if [ -z $PackageName ]; then
+if [ -z "$PackageName" ]; then
   echo "ui_print Android Universe Module Deployer" >"$PrintOut"
 else
   echo "ui_print $PackageName" >"$PrintOut"
   echo "ui_print Powered by Android Universe Module Deployer" >"$PrintOut"
 fi
 echo "ui_print ===========================================" >"$PrintOut"
+UnmountAllPartatition
 
 # Get Modules list
 $InternalUnzip -Z -1 "$PackageSource" | grep Modules >"$TempFolder/ModulesList.txt"
@@ -123,6 +151,8 @@ Direct)
   $InternalBusyBox rm "$TempFolder/ModulesList.txt"
   $InternalBusyBox mv "$TempFolder/ModulesListNew.txt" "$TempFolder/ModulesList.txt"
   ;;
+TAR) ;;
+
 *)
   echo "ui_print ! ERROR: Unknown Modules Mode" >"$PrintOut"
   exit 1
@@ -131,43 +161,58 @@ esac
 
 # Calculation Progress
 PackageModuleCount=$($InternalBusyBox wc -l "$TempFolder/ModulesList.txt" | $InternalBusyBox awk -F ' ' '{print $1}')
-ProgressIncrease=$((900 / PackageModuleCount))
-set_progress 0.05
+ProgressIncrease=$((800000 / PackageModuleCount))
+CurrentProgress=100000
+echo "set_progress 0.$CurrentProgress" >"$PrintOut"
 
 # Deploy Modules
 for ModuleExtractedPath in $(cat "$TempFolder/ModulesList.txt"); do
 
-  # Generate current Module List
-  echo "ui_print - Extracting Module" >"$PrintOut"
+  # Get Modules Infomation
   case "$PackageMode" in
   ZIP)
     $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath" -d "$TempFolder/ModuleExtracted/"
     ModulePath="$TempFolder/ModuleExtracted/${ModuleExtractedPath%.zip}"
-    $InternalUnzip -o "$TempFolder/ModuleExtracted/$ModuleExtractedPath" -d "$ModulePath"
+    $InternalUnzip -o "$TempFolder/ModuleExtracted/$ModuleExtractedPath" "Config.ini" -d "$ModulePath"
     ;;
   Direct)
-    $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath/*" -d "$TempFolder/ModuleExtracted/"
+    $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath/Config.ini" -d "$TempFolder/ModuleExtracted/"
     ModulePath="$TempFolder/ModuleExtracted/${ModuleExtractedPath}"
     ;;
   TAR) ;;
   esac
 
-  # Get Modules Infomation
   ModuleName=$(INIRead "$ModulePath/Config.ini" Module ModuleName)
   ModuleVersion=$(INIRead "$ModulePath/Config.ini" Module Version)
   ModuleVersionCode=$(INIRead "$ModulePath/Config.ini" Module VersionCode)
   ModulePart=$(INIRead "$ModulePath/Config.ini" Module ModulePart)
   ModuleEnabled=$(INIRead "$ModulePath/Config.ini" Module Enabled)
+  ModuleDescription=$(INIRead "$ModulePath/Config.ini" Module Description)
   if [ "$ModuleEnabled" == "true" ]; then
     ModuleInstallState="Normal"
   else
     ModuleInstallState="Disabled"
   fi
 
-  echo "ui_print > Module   : ${ModuleName}" >"$PrintOut"
-  echo "ui_print > Version  : ${ModuleVersion}" >"$PrintOut"
+  echo "ui_print > Module     : ${ModuleName}" >"$PrintOut"
+  echo "ui_print > Version    : ${ModuleVersion}" >"$PrintOut"
+  if [-n "$ModuleDescription"]; then
+    echo "ui_print > Description: ${ModuleDescription}" >"$PrintOut"
+  fi
   case "$ModuleInstallState" in
   Normal)
+    # Decompress Files
+    echo "ui_print - Extracting Module" >"$PrintOut"
+    case "$PackageMode" in
+    ZIP)
+      $InternalUnzip -o "$TempFolder/ModuleExtracted/$ModuleExtractedPath" -d "$ModulePath"
+      ;;
+    Direct)
+      $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath/*" -d "$TempFolder/ModuleExtracted/"
+      ;;
+    TAR) ;;
+    esac
+
     # Get Modules Files Target
     echo "ui_print - Deploying Files" >"$PrintOut"
     for ModulePartCurrent in $(echo $ModulePart | awk -F ',' '{len=split($0,n); for(i=1;i<=len;++i) print n[i]}'); do
@@ -194,46 +239,57 @@ for ModuleExtractedPath in $(cat "$TempFolder/ModulesList.txt"); do
 
       case "$ModulePartCurrent" in
       system)
-        if [ "$DeviceABPartition" == "Aonly" ]; then
-          $InternalBusyBox mount -w "/dev/block/bootdevice/by-name/system_root" "$TempFolder/Mounted/system"
-        fi
-        $InternalBusyBox mount -w "/dev/block/bootdevice/by-name/system$ModuleInstallSlot" "$TempFolder/Mounted/system"
-        if [ "$DeviceABPartition" == "Aonly" ] || [ "$DeviceABPartition" == "AB" ]; then
-          $InternalBusyBox cp -rf "$ModulePath/system" "$TempFolder/Mounted/system/"
-        else
-          $InternalBusyBox cp -rf "$ModulePath/system" "$TempFolder/Mounted/"
-        fi
-        $InternalBusyBox umount "$TempFolder/Mounted/system"
+        case "$DeviceABPartition" in
+        AB)
+          MountParatition "system$PackageInstallSlot" "system"
+          export SystemMountedPoint="$TempFolder/Mounted/system/system"
+          ;;
+        Aonly)
+          MountParatition "system_root" "system"
+          export SystemMountedPoint="$TempFolder/Mounted/system/system"
+          ;;
+        false)
+          MountParatition "system" "system"
+          export SystemMountedPoint="$TempFolder/Mounted/system"
+          ;;
+        esac
+        $InternalBusyBox cp -rf "$ModulePath/system/*" "$SystemMountedPoint/"
         ;;
       vendor)
-        if [ "$DeviceABPartition" == "false" ]; then
-          $InternalBusyBox mount -w "/dev/block/bootdevice/by-name/system" "$TempFolder/Mounted/system"
-          $InternalBusyBox cp -rf "$ModulePath/vendor" "$TempFolder/Mounted/system/"
-          $InternalBusyBox umount "$TempFolder/Mounted/system"
-        else
-          $InternalBusyBox mount -w "/dev/block/bootdevice/by-name/vendor$ModuleInstallSlot" "$TempFolder/Mounted/vendor"
-          $InternalBusyBox cp -rf "$ModulePath/vendor" "$TempFolder/Mounted/"
-          $InternalBusyBox umount "$TempFolder/Mounted/vendor"
-        fi
+        case "$DeviceABPartition" in
+        AB)
+          MountParatition "vendor$PackageInstallSlot" "vendor"
+          export VendorMountedPoint="$TempFolder/Mounted/vendor"
+          ;;
+        Aonly)
+          MountParatition "vendor" "vendor"
+          export VendorMountedPoint="$TempFolder/Mounted/vendor"
+          ;;
+        false)
+          MountParatition "system" "system"
+          export VendorMountedPoint="$TempFolder/Mounted/system/vendor"
+          ;;
+        esac
+        $InternalBusyBox cp -rf "$ModulePath/vendor/*" "$VendorMountedPoint/"
         ;;
       modem)
-        $InternalBusyBox mount -w "/dev/block/bootdevice/by-name/modem$ModuleInstallSlot" "$TempFolder/Mounted/modem"
-        $InternalBusyBox cp -rf "$ModulePath/modem" "$TempFolder/Mounted/"
-        $InternalBusyBox umount "$TempFolder/Mounted/modem"
+        MountParatition "modem$PackageInstallSlot" "modem"
+        export ModemMountedPoint="$TempFolder/Mounted/vendor"
+        $InternalBusyBox cp -rf "$ModulePath/modem/*" "$ModemMountedPoint/"
         ;;
       sony_oem)
         if [ "$DeviceBrand" == "Sony" ]; then
-          $InternalBusyBox mount -w "/dev/block/bootdevice/by-name/oem$ModuleInstallSlot" "$TempFolder/Mounted/oem"
-          $InternalBusyBox cp -rf "$ModulePath/oem" "$TempFolder/Mounted/"
-          $InternalBusyBox umount "$TempFolder/Mounted/oem"
+          MountParatition "oem$PackageInstallSlot" "oem"
+          export SonyOEMMountedPoint="$TempFolder/Mounted/vendor"
+          $InternalBusyBox cp -rf "$ModulePath/oem/*" "$SonyOEMMountedPoint/"
         else
-          echo "ui_print - WARNING: Your device isn't Sony Xperia devices. The part of sony_oem isn't install." >"$PrintOut"
+          echo "ui_print - WARNING: Your device isn't Sony Xperia devices. Part \"sony_oem\" isn't install." >"$PrintOut"
         fi
         ;;
       esac
     done
 
-    # Module Custom Script
+    # Execute Custom Script
     if [ -e "$ModulePath/Config.sh" ]; then
       echo "ui_print - Running Additional Script" >"$PrintOut"
       $InternalBusyBox sh "$ModulePath/Config.sh"
@@ -241,10 +297,10 @@ for ModuleExtractedPath in $(cat "$TempFolder/ModulesList.txt"); do
     echo "ui_print - Install Completed" >"$PrintOut"
     ;;
   Disabled)
-    echo "ui_print - Module isn't installed because it was been disabled" >"$PrintOut"
+    echo "ui_print - Module \"$ModuleName\" isn't installed because it was been disabled" >"$PrintOut"
     ;;
   *)
-    echo "ui_print ! ERROR: Unknown install state. Module isn't installed." >"$PrintOut"
+    echo "ui_print ! ERROR: Unknown install state. Module \"$ModuleName\" isn't installed." >"$PrintOut"
     ;;
   esac
 
@@ -253,7 +309,7 @@ for ModuleExtractedPath in $(cat "$TempFolder/ModulesList.txt"); do
 
   # Set Progress
   CurrentProgress=$(($CurrentProgress + $ProgressIncrease))
-  set_progress 0.$CurrentProgress
+  echo "set_progress 0.$CurrentProgress" >"$PrintOut"
 
 done
 
@@ -264,7 +320,7 @@ echo "ui_print - Setting Premissions" >"$PrintOut"
 if [ "$DeviceABPartition" == "Aonly" ]; then
   PkgInstallSlot="_root"
 fi
-$InternalBusyBox mount -w "/dev/block/bootdevice/by-name/system$PkgInstallSlot" "$TempFolder/Mounted/system"
+MountParatition "system$PkgInstallSlot" "system"
 for PermissionPath in app priv-app; do
   if [ "$DeviceABPartition" == "Aonly" ] || [ "$DeviceABPartition" == "AB" ]; then
     $InternalBusyBox find "$TempFolder/Mounted/system/system/$PermissionPath" -type f | xargs $InternalBusyBox chmod 644
@@ -274,10 +330,10 @@ for PermissionPath in app priv-app; do
     $InternalBusyBox find "$TempFolder/Mounted/system/$PermissionPath" -type d | xargs $InternalBusyBox chmod 755
   fi
 done
-$InternalBusyBox umount "$TempFolder/Mounted/system"
 
+UnmountAllPartatition
 echo "ui_print   Deploy Completed" >"$PrintOut"
 echo "ui_print ===========================================" >"$PrintOut"
-set_progress 1.0
+echo "set_progress 1.000000" >"$PrintOut"
 
 exit 0
