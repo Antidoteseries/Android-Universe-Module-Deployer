@@ -4,14 +4,13 @@
 # Author: Antidotes
 # Source: https://github.com/Antidoteseries/Android-Universe-Module-Deployer
 # Licenced by GPLv3
-# Version: 0.3.3 Alpha
+# Version: 0.3.5 Alpha
 ###########################################################################
 
 # Initial Define
 export PackageSource="$3"
 export PrintFD="/proc/self/fd/$2"
 export TempFolder="/tmp"
-export LogEnabled="true"
 
 # Printout for Recovery
 Printout() {
@@ -61,19 +60,34 @@ SetProgress() {
   echo "set_progress $ProgressNow" >>"$PrintFD"
 }
 
-# Prepare for getting data from Config.ini
-INIRead() {
-  local INIFile="$1"
-  local INISect="$2"
-  local INIKey="$3"
-  local INIResult="$($InternalBusyBox awk -F '=' '/\['$INISect'\]/ {FIND=1} FIND==1 && $1~/'$INIKey'/ {print $2;exit}' $INIFile)"
-  echo "$INIResult"
+# Prepare for getting data from Config.prop
+GetProp2() {
+  local PropFilePaths="$1"
+  local PropName="$2"
+  if [ "$PropFilePaths" = "System" ]; then
+    if [ ! "$SystemGetpropEnabled" = "true" ]; then
+      local PropValue="getprop $PropName"
+    else
+      PropFilePaths="$SystemGetpropFilePath"
+    fi
+  else
+    local PropValue="$($InternalBusyBox grep "^$PropName=" "$PropName" | $InternalBusyBox cut -d "=" -f 2-)"
+  fi
+  echo "$PropValue"
+}
+SetProp2() {
+  local PropFilePaths="$1"
+  local PropName="$2"
+  local PropValue="$3"
+  if [ -z "$($InternalBusyBox grep "^$PropName=" "$PropName")" ]; then
+    echo "$PropName=$PropValue" >>"$PropFilesPaths"
+  else
+    local PropValueOriginal="$(GetProp2 $PropName $PropFilePaths)"
+    $InternalBusyBox sed -i 's/$PropName=$PropValueOriginal/$PropName=$PropValue/g' "$PropFilePaths"
+  fi
 }
 
 # Prepare Log
-if [ "$LogEnabled" == "true" ]; then
-  echo "Install Log for Android Universe Module Deployer" >"$TempFolder/InstallLog.log"
-fi
 Log() {
   if [ "$LogEnabled" == "true" ]; then
     local LogAction="$1"
@@ -127,12 +141,22 @@ ExitMode() {
   fi
 }
 
-# Get Package Infomation
-unzip -o "$PackageSource" "Config.ini" -d "$TempFolder"
+# Get Package Settings and Infomation
+unzip -o "$PackageSource" "Config.prop" -d "$TempFolder"
+
+LogEnabled=$(GetProp2 "$TempFolder/Config.prop" setting.log.enabled)
+if [ "$LogEnabled" == "true" ]; then
+  echo "Install Log for Android Universe Module Deployer" >"$TempFolder/InstallLog.log"
+fi
+
+SystemGetpropEnabled=$(GetProp2 "$TempFolder/Config.prop" setting.system.getprop.enabled)
+SystemGetpropFilePath=$(GetProp2 "$TempFolder/Config.prop" setting.system.getprop.filepath)
+SystemBusyboxEnabled=$(GetProp2 "$TempFolder/Config.prop" setting.system.busybox.enabled)
+
 Log Center "Package Informations"
-PackageName=$(INIRead "$TempFolder/Config.ini" Package PackageName) && Log "Package" "$PackageName"
-PackageDevice=$(INIRead "$TempFolder/Config.ini" Package Device) && Log "Target Device" "$PackageDevice"
-PackageMode=$(INIRead "$TempFolder/Config.ini" Package Mode) && Log "Mode" "$PackageMode"
+PackageName=$(GetProp2 "$TempFolder/Config.prop" package.name) && Log "Package" "$PackageName"
+PackageDevice=$(GetProp2 "$TempFolder/Config.prop" package.device) && Log "Target Device" "$PackageDevice"
+PackageMode=$(GetProp2 "$TempFolder/Config.prop" package.mode) && Log "Mode" "$PackageMode"
 
 # Detect CPU Architecture
 case "$(uname -m)" in
@@ -151,28 +175,30 @@ chmod -R 755 "$TempFolder/bin/"
 
 export InternalUnzip="$TempFolder/bin/unzip_$Architecture"
 export InternalTar="$TempFolder/bin/tar_$Architecture"
-export InternalBusyBox="$TempFolder/bin/busybox_$Architecture"
+if [ ! "$SystemBusyboxEnabled" = "true" ]; then
+  export InternalBusyBox="$TempFolder/bin/busybox_$Architecture"
+fi
 
 # Set SELinux to Permissive
 setenforce 0
 
 # Detect Device Information
 Log Center "Device Informations"
-DeviceName=$(getprop ro.product.board) && Log "Device" "$DeviceName"
-DeviceDevelopName=$(getprop ro.product.device) && Log "Developing Name" "$DeviceDevelopName"
-DeviceBrand=$(getprop ro.product.brand) && Log "Brand" "$DeviceBrand"
-DeviceAndroidVersion=$(getprop ro.build.version.release) && Log "Android Version" "$DeviceAndroidVersion"
-DeviceSDKVersion=$(getprop ro.build.version.sdk) && Log "SDK Version" "$DeviceSDKVersion"
+DeviceName=$(GetProp2 System ro.product.board) && Log "Device" "$DeviceName"
+DeviceDevelopName=$(GetProp2 System ro.product.device) && Log "Developing Name" "$DeviceDevelopName"
+DeviceBrand=$(GetProp2 System ro.product.brand) && Log "Brand" "$DeviceBrand"
+DeviceAndroidVersion=$(GetProp2 System ro.build.version.release) && Log "Android Version" "$DeviceAndroidVersion"
+DeviceSDKVersion=$(GetProp2 System ro.build.version.sdk) && Log "SDK Version" "$DeviceSDKVersion"
 Log "Architecture" "$Architecture"
 
 # Detect A/B Partition and system-as-root
-if [ $(getprop ro.build.system_root_image) == "true" ]; then
-  if [ -z $(getprop ro.boot.slot_suffix) ]; then
+if [ $(GetProp2 System ro.build.system_root_image) == "true" ]; then
+  if [ -z $(GetProp2 System ro.boot.slot_suffix) ]; then
     DeviceABPartition="Aonly" && Log "A/B Partition" "$DeviceABPartition"
   else
     DeviceABPartition="AB" && Log "A/B Partition" "$DeviceABPartition"
-    DeviceActiveSlot=$(getprop ro.boot.slot_suffix) && Log "A/B Active Slot" "$DeviceActiveSlot"
-    PackageABSlot=$(INIRead "$TempFolder/Config.ini" Package ABSlot) && Log "Package Slot" "$PackageABSlot"
+    DeviceActiveSlot=$(GetProp2 System ro.boot.slot_suffix) && Log "A/B Active Slot" "$DeviceActiveSlot"
+    PackageABSlot=$(GetProp2 "$TempFolder/Config.prop" package.abslot) && Log "Package Slot" "$PackageABSlot"
     case $PackageABSlot in
     A)
       PackageInstallSlot="_a"
@@ -284,58 +310,59 @@ Log Divide2Line
 Log Center "Module Infomations"
 # Calculation Progress
 PackageModuleCount=$($InternalBusyBox wc -l "$TempFolder/ModulesList.txt" | $InternalBusyBox awk -F ' ' '{print $1}') && Log "Module Count" "$PackageModuleCount"
-ProgressIncrease=$((800000 / PackageModuleCount))
-CurrentProgress=100000
+ProgressIncrease=$((900000 / PackageModuleCount))
+CurrentProgress=050000
 SetProgress "0.$CurrentProgress"
 
 # Deploy Modules
-for ModuleExtractedPath in $(cat "$TempFolder/ModulesList.txt"); do
+for ModuleExtractedPath in $($InternalBusybox cat "$TempFolder/ModulesList.txt"); do
   Log Divide
   $InternalBusyBox mkdir "$TempFolder/ModuleExtracted/$ModuleExtractedPath"
   # Get Modules Infomation
   case "$PackageMode" in
   Direct)
-    $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath/Config.ini" -d "$TempFolder/ModuleExtracted/"
+    $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath/Config.prop" -d "$TempFolder/ModuleExtracted/"
     ModulePath="$TempFolder/ModuleExtracted/${ModuleExtractedPath}"
     ;;
   zip)
     $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath" -d "$TempFolder/ModuleExtracted/"
     ModulePath="$TempFolder/ModuleExtracted/${ModuleExtractedPath%.zip}"
-    $InternalUnzip -o "$TempFolder/ModuleExtracted/$ModuleExtractedPath" "Config.ini" -d "$ModulePath"
+    $InternalUnzip -o "$TempFolder/ModuleExtracted/$ModuleExtractedPath" "Config.prop" -d "$ModulePath"
     ;;
   tar)
-$InternalUnzip -o "$PackageSource" "$ModuleExtractedPath" -d "$TempFolder/ModuleExtracted/"
+    $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath" -d "$TempFolder/ModuleExtracted/"
     ModulePath="$TempFolder/ModuleExtracted/${ModuleExtractedPath%.tar}"
-    $InternalTar -xf "$ModulePath" "Config.ini" -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath"
-  ;;
+    $InternalTar -xf "$ModulePath" "Config.prop" -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath"
+    ;;
   targz)
-  $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath" -d "$TempFolder/ModuleExtracted/"
+    $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath" -d "$TempFolder/ModuleExtracted/"
     ModulePath="$TempFolder/ModuleExtracted/${ModuleExtractedPath%.tar.gz}"
-    $InternalTar -zxf "$ModulePath" "Config.ini" -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath"
-   ;;
-  tarbz2) 
-  $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath" -d "$TempFolder/ModuleExtracted/"
+    $InternalTar -zxf "$ModulePath" "Config.prop" -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath"
+    ;;
+  tarbz2)
+    $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath" -d "$TempFolder/ModuleExtracted/"
     ModulePath="$TempFolder/ModuleExtracted/${ModuleExtractedPath%.tar.bz2}"
-    $InternalTar -jxf "$ModulePath" "Config.ini" -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath"
-  ;;
+    $InternalTar -jxf "$ModulePath" "Config.prop" -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath"
+    ;;
   esac
 
-  ModuleName=$(INIRead "$ModulePath/Config.ini" Module ModuleName) && Log "Module" "$ModuleName"
-  ModuleVersion=$(INIRead "$ModulePath/Config.ini" Module Version) && Log "Version" "$ModuleVersion"
-  ModuleVersionCode=$(INIRead "$ModulePath/Config.ini" Module VersionCode) && Log "Version Code" "$ModuleVersionCode"
-  ModulePart=$(INIRead "$ModulePath/Config.ini" Module ModulePart) && Log "Part" "$ModulePart"
-  ModuleEnabled=$(INIRead "$ModulePath/Config.ini" Module Enabled) && Log "Enabled" "$ModuleEnabled"
-  ModuleDescription=$(INIRead "$ModulePath/Config.ini" Module Description) && Log "Description" "$ModuleDescription"
+  ModuleName=$(GetProp2 "$ModulePath/Config.prop" module.name) && Log "Module" "$ModuleName"
+  ModuleEnabled=$(GetProp2 "$ModulePath/Config.prop" module.enabled) && Log "Enabled" "$ModuleEnabled"
+  ModuleDescription=$(GetProp2 "$ModulePath/Config.prop" module.description) && Log "Description" "$ModuleDescription"
+  ModuleVersion=$(GetProp2 "$ModulePath/Config.prop" module.version) && Log "Version" "$ModuleVersion"
+  ModuleVersionCode=$(GetProp2 "$ModulePath/Config.prop" module.versionCode) && Log "Version Code" "$ModuleVersionCode"
+  ModulePart=$(GetProp2 "$ModulePath/Config.prop" module.part) && Log "Part" "$ModulePart"
+
   if [ "$ModuleEnabled" == "true" ]; then
     ModuleInstallState="Normal"
   else
     ModuleInstallState="Disabled"
   fi
 
-  Printout Info "Module     : ${ModuleName}"
-  Printout Info "Version    : ${ModuleVersion}"
+  Printout Info "Module     : $ModuleName"
+  Printout Info "Version    : $ModuleVersion"
   if [ ! -z "$ModuleDescription" ]; then
-    Printout Info "Description: ${ModuleDescription}"
+    Printout Info "Description: $ModuleDescription"
   fi
   case "$ModuleInstallState" in
   Normal)
@@ -345,23 +372,25 @@ $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath" -d "$TempFolder/Module
     Direct)
       $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath/*" -d "$TempFolder/ModuleExtracted/"
       ;;
-         zip)
+    zip)
       $InternalUnzip -o "$TempFolder/ModuleExtracted/$ModuleExtractedPath" -d "$ModulePath"
       ;;
-      tar)
-   $InternalTar -xf "$ModulePath" -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath"
-  ;;
-  targz)
-   $InternalTar -zxf "$ModulePath"  -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath" ;;
-  tarbz2) 
-   $InternalTar -jxf "$ModulePath" "Config.ini" -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath";;
+    tar)
+      $InternalTar -xf "$ModulePath" -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath"
+      ;;
+    targz)
+      $InternalTar -zxf "$ModulePath" -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath"
+      ;;
+    tarbz2)
+      $InternalTar -jxf "$ModulePath" "Config.prop" -C "$TempFolder/ModuleExtracted/$ModuleExtractedPath"
+      ;;
     esac
 
     # Get Modules Files Target
     Printout Normal "Deploying Files"
     for ModulePartCurrent in $(echo $ModulePart | awk -F ',' '{len=split($0,n); for(i=1;i<=len;++i) print n[i]}'); do
       if [ "$DeviceABPartition" == "AB" ]; then
-        ModuleABSlot=$(INIRead "$ModulePath/Config.ini" Module ModuleABSlot)
+        ModuleABSlot=$(GetProp2 "$ModulePath/Config.prop" Module ModuleABSlot)
         case "$ModuleABSlot" in
         A)
           ModuleInstallSlot="_a"
@@ -414,18 +443,18 @@ $InternalUnzip -o "$PackageSource" "$ModuleExtractedPath" -d "$TempFolder/Module
           export VendorMountedPoint="$TempFolder/Mounted/system/vendor"
           ;;
         esac
-        $InternalBusyBox cp -rf "$ModulePath/vendor/." "$VendorMountedPoint/" && Log "Copy Files" "From $ModulePath/vendor/* to $VendorMountedPoint/"
+        $InternalBusyBox cp -rf "$ModulePath/vendor/." "$VendorMountedPoint/" && Log "Copy Files" "From $ModulePath/vendor/. to $VendorMountedPoint/"
         ;;
       modem)
         MountParatition "modem$PackageInstallSlot" "modem"
-        export ModemMountedPoint="$TempFolder/Mounted/vendor"
-        $InternalBusyBox cp -rf "$ModulePath/modem/." "$ModemMountedPoint/" && Log "Copy Files" "From $ModulePath/modem/* to $ModemMountedPoint/"
+        export ModemMountedPoint="$TempFolder/Mounted/modem"
+        $InternalBusyBox cp -rf "$ModulePath/modem/." "$ModemMountedPoint/" && Log "Copy Files" "From $ModulePath/modem/. to $ModemMountedPoint/"
         ;;
       sony_oem)
         if [ "$DeviceBrand" == "Sony" ]; then
           MountParatition "oem$PackageInstallSlot" "oem"
-          export SonyOEMMountedPoint="$TempFolder/Mounted/vendor"
-          $InternalBusyBox cp -rf "$ModulePath/oem/." "$SonyOEMMountedPoint/" && Log "Copy Files" "From $ModulePath/oem/* to $SonyOEMMountedPoint/"
+          export SonyOEMMountedPoint="$TempFolder/Mounted/oem"
+          $InternalBusyBox cp -rf "$ModulePath/oem/." "$SonyOEMMountedPoint/" && Log "Copy Files" "From $ModulePath/oem/. to $SonyOEMMountedPoint/"
         else
           Printout Warning "Your device isn't Sony Xperia devices. Part \"sony_oem\" isn't install." && Log Warning "Require Device \"Sony\""
         fi

@@ -3,12 +3,16 @@
 # Author: Antidotes
 # Source: https://github.com/Antidoteseries/Android-Universe-Module-Deployer
 # Licenced by GPLv3
-# Version: 0.3.1 Alpha
+# Version: 0.3.5 Alpha
 ###########################################################################
-[Module]
-ModuleName=SimpleName
-Vension=1.0.0
-VersionCode=1
-ModulePart=system,vendor,sony_oem
-Enabled=true
-Description=What you want to say
+#
+# This is a sample file, you can change it as you need
+#
+module.name=Sample
+module.enabled=true
+module.description=What you want to say
+
+module.version=1.0
+module.version.code=1
+
+module.part=system,vendor,sony_oem

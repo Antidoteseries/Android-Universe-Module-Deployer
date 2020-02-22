@@ -1,0 +1,26 @@
+# Package config for recovery installer
+# This is a part of Android Universe Module Deployer
+# Author: Antidotes
+# Source: https://github.com/Antidoteseries/Android-Universe-Module-Deployer
+# Licenced by GPLv3
+# Version: 0.3.5 Alpha
+###########################################################################
+#
+# This is a sample file, you can change it as you need
+#
+setting.log.enabled=true
+setting.system.busybox.enabled=false
+setting.system.getprop.enabled=true
+setting.system.getprop.filepath=
+
+package.name=Sample
+
+package.device.check.enabled=false
+package.device.brand=
+package.device.model=
+package.device.name=
+package.device.fingerprint=
+
+package.extract.mode=Direct
+
+package.abslot=Current
