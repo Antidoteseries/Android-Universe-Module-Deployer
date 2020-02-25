@@ -16,3 +16,4 @@ module.version=1.0
 module.version.code=1
 
 module.part=system,vendor,sony_oem
+module.abslot=Follow

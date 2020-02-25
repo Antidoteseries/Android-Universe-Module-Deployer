@@ -4,7 +4,7 @@
 # Author: Antidotes
 # Source: https://github.com/Antidoteseries/Android-Universe-Module-Deployer
 # Licenced by GPLv3
-# Version: 0.3.5 Alpha
+# Version: 0.3.6 Alpha
 ###########################################################################
 
 # Initial Define
@@ -65,13 +65,13 @@ GetProp2() {
   local PropFilePaths="$1"
   local PropName="$2"
   if [ "$PropFilePaths" = "System" ]; then
-    if [ ! "$SystemGetpropEnabled" = "true" ]; then
-      local PropValue="getprop $PropName"
+    if [ "$SystemGetpropEnabled" = "true" ]; then
+      local PropValue="$(getprop $PropName)"
     else
-      PropFilePaths="$SystemGetpropFilePath"
+      local PropValue="$($InternalBusyBox grep "^$PropName=" "$SystemGetpropFilePath" | $InternalBusyBox cut -d "=" -f 2-)"
     fi
   else
-    local PropValue="$($InternalBusyBox grep "^$PropName=" "$PropName" | $InternalBusyBox cut -d "=" -f 2-)"
+    local PropValue="$($InternalBusyBox grep "^$PropName=" "$PropFilePaths" | $InternalBusyBox cut -d "=" -f 2-)"
   fi
   echo "$PropValue"
 }
@@ -79,11 +79,11 @@ SetProp2() {
   local PropFilePaths="$1"
   local PropName="$2"
   local PropValue="$3"
-  if [ -z "$($InternalBusyBox grep "^$PropName=" "$PropName")" ]; then
-    echo "$PropName=$PropValue" >>"$PropFilesPaths"
+  if [ -z "$($InternalBusyBox grep "^$PropName=" "$PropFilePaths")" ]; then
+    echo "$PropName=$PropValue" >>"$PropFilePaths"
   else
-    local PropValueOriginal="$(GetProp2 $PropName $PropFilePaths)"
-    $InternalBusyBox sed -i 's/$PropName=$PropValueOriginal/$PropName=$PropValue/g' "$PropFilePaths"
+    local PropValueOriginal="$(GetProp2 "$PropFilePaths" "$PropName")"
+    $InternalBusyBox sed -i "s/$PropName=$PropValueOriginal/$PropName=$PropValue/g" "$PropFilePaths"
   fi
 }
 
@@ -145,7 +145,7 @@ ExitMode() {
 unzip -o "$PackageSource" "Config.prop" -d "$TempFolder"
 
 LogEnabled=$(GetProp2 "$TempFolder/Config.prop" setting.log.enabled)
-if [ "$LogEnabled" == "true" ]; then
+if [ ! "$LogEnabled" == "false" ]; then
   echo "Install Log for Android Universe Module Deployer" >"$TempFolder/InstallLog.log"
 fi
 
@@ -155,8 +155,16 @@ SystemBusyboxEnabled=$(GetProp2 "$TempFolder/Config.prop" setting.system.busybox
 
 Log Center "Package Informations"
 PackageName=$(GetProp2 "$TempFolder/Config.prop" package.name) && Log "Package" "$PackageName"
-PackageDevice=$(GetProp2 "$TempFolder/Config.prop" package.device) && Log "Target Device" "$PackageDevice"
-PackageMode=$(GetProp2 "$TempFolder/Config.prop" package.mode) && Log "Mode" "$PackageMode"
+PackageTargetCheck=$(GetProp2 "$TempFolder/Config.prop" package.device.check.enabled) && Log "Target Check" "$PackageTargetCheck"
+if [ "$PackageTargetCheck" == "true" ]; then
+  Log Divide
+  PackageTargetBrand=$(GetProp2 "$TempFolder/Config.prop" package.device.brand) && Log "Target Brand" "$PackageTargetBrand"
+  PackageTargetModel=$(GetProp2 "$TempFolder/Config.prop" package.device.model) && Log "Target Model" "$PackageTargetModel"
+  PackageTargetName=$(GetProp2 "$TempFolder/Config.prop" package.device.name) && Log "Target Name" "$PackageTargetname"
+  PackageTargetFingerpoint=$(GetProp2 "$TempFolder/Config.prop" package.device.fingerpoint) && Log "Target Fingerpoint" "$PackageTargetFingerpoint"
+  Log Divide
+fi
+PackageMode=$(GetProp2 "$TempFolder/Config.prop" package.extract.mode) && Log "Mode" "$PackageMode"
 
 # Detect CPU Architecture
 case "$(uname -m)" in
@@ -390,7 +398,7 @@ for ModuleExtractedPath in $($InternalBusybox cat "$TempFolder/ModulesList.txt")
     Printout Normal "Deploying Files"
     for ModulePartCurrent in $(echo $ModulePart | awk -F ',' '{len=split($0,n); for(i=1;i<=len;++i) print n[i]}'); do
       if [ "$DeviceABPartition" == "AB" ]; then
-        ModuleABSlot=$(GetProp2 "$ModulePath/Config.prop" Module ModuleABSlot)
+        ModuleABSlot=$(GetProp2 "$ModulePath/Config.prop" module.abslot)
         case "$ModuleABSlot" in
         A)
           ModuleInstallSlot="_a"
@@ -465,7 +473,7 @@ for ModuleExtractedPath in $($InternalBusybox cat "$TempFolder/ModulesList.txt")
     # Execute Custom Script
     if [ -e "$ModulePath/Config.sh" ]; then
       Printout Normal "Running Additional Script"
-      $InternalBusyBox sh "$ModulePath/Config.sh" && Log "Script Execute" "$ModulePath/Config.sh"
+      . "$ModulePath/Config.sh" && Log "Script Execute" "$ModulePath/Config.sh"
     fi
     Printout Normal "Install Completed"
     ;;
